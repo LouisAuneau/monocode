@@ -12,7 +12,12 @@ export type NativeCommand = {
   subcommands?: Array<{ name: string; description?: string; usage?: string }>;
 };
 
-export type CommandContext = { cwd: string; sessionId?: string };
+export type CommandContext = {
+  cwd: string;
+  sessionId?: string;
+  /** Provider account whose config the session runs under. */
+  accountId?: string;
+};
 
 export type NativeCommandProvider = {
   discover(context: CommandContext): Promise<NativeCommand[]>;

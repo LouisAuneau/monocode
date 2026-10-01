@@ -125,6 +125,16 @@ describe("native catalog with MonoCode skill settings", () => {
     expect(mocks.listSkills).not.toHaveBeenCalled();
   });
 
+  it("caches each provider account separately", async () => {
+    await loadSkills({ harness: "claude", cwd: "/repo", accountId: "work" });
+    await loadSkills({ harness: "claude", cwd: "/repo", accountId: "home" });
+    expect(mocks.discover).toHaveBeenCalledTimes(2);
+    expect(mocks.discover.mock.calls.map(([context]) => context.accountId)).toEqual([
+      "work",
+      "home",
+    ]);
+  });
+
   it("injects the create-skill body but leaves native commands to the CLI", async () => {
     const created = await applySkillsToTurn("/create-skill for deploys", {
       harness: "claude",
