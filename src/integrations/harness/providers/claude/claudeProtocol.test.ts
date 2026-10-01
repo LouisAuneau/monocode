@@ -92,8 +92,14 @@ describe("applyClaudePromptEffortPrefix", () => {
 
   it("leaves a leading slash command first", () => {
     expect(
-      applyClaudePromptEffortPrefix("/code-review high", "ultrathink"),
-    ).toBe("/code-review high");
+      buildClaudeUserMessage({
+        text: "/code-review high",
+        effort: "ultrathink",
+        command: true,
+      }),
+    ).toMatchObject({
+      message: { content: [{ type: "text", text: "/code-review high" }] },
+    });
   });
 });
 

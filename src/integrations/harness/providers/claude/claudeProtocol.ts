@@ -168,8 +168,6 @@ export function applyClaudePromptEffortPrefix(
 ): string {
   if (effort !== "ultrathink") return text;
   if (!text) return "Ultrathink:";
-  // The CLI only runs a slash command that leads the prompt.
-  if (/^\s*\/[^\s/\\]+(?=\s|$)/.test(text)) return text;
   return `Ultrathink:\n${text}`;
 }
 
@@ -195,10 +193,11 @@ export function buildClaudeUserMessage(input: {
   text: string;
   attachments?: Attachment[];
   effort?: string | null;
+  command?: boolean;
 }): Record<string, unknown> {
   const text = applyClaudePromptEffortPrefix(
     promptText(input.text, input.attachments ?? []),
-    input.effort,
+    input.command ? null : input.effort,
   );
   const content: Array<Record<string, unknown>> = [];
   if (text) content.push({ type: "text", text });

@@ -516,6 +516,29 @@ export async function applySkillsToTurn(
   return injectSkillPrompt(text, picked, bodies);
 }
 
+/** Let the harness refresh what a send needs before the turn starts. */
+export async function prepareNativeCommand(
+  text: string,
+  context: SkillCatalogContext,
+  effort?: string,
+): Promise<void> {
+  const commands = getHarness(context.harness)?.commands;
+  // MonoCode expands its own built-in; the harness never sees it lead.
+  if (
+    commands?.monocodeSkills &&
+    new RegExp(`^\\s*/${BUILTIN_CREATE_SKILL.name}(?=\\s|$)`).test(text)
+  )
+    return;
+  await commands
+    ?.beforeSend?.(text, {
+      cwd: normalizeProjectPath(context.cwd),
+      ...(context.sessionId ? { sessionId: context.sessionId } : {}),
+      ...(context.accountId ? { accountId: context.accountId } : {}),
+      ...(effort ? { effort } : {}),
+    })
+    .catch(() => undefined);
+}
+
 type SkillLoader = typeof loadSkills;
 
 export function warmNativeSkills(
