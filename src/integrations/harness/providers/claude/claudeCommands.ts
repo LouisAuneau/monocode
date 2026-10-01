@@ -46,6 +46,7 @@ const HIDDEN_COMMANDS = new Set([
 ]);
 
 export const claudeCommandProvider: NativeCommandProvider = {
+  monocodeSkills: true,
   discover: ({ cwd }) => discoverClaudeCommands(cwd),
 };
 

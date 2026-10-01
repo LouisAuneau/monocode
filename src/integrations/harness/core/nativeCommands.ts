@@ -22,6 +22,12 @@ export type NativeCommandProvider = {
   ): () => void;
   /** Full command runtimes own slash arguments, including @file-like text. */
   rawSlashCommands?: boolean;
+  /**
+   * The harness reads the same skill files MonoCode discovers, so MonoCode's
+   * skill settings apply: disabled skills stay hidden and `/create-skill` is
+   * offered.
+   */
+  monocodeSkills?: boolean;
 };
 
 const RESERVED_COMMANDS = new Set(["plan", "compact", "add-to-folder"]);
