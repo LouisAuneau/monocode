@@ -64,6 +64,9 @@ export async function discoverClaudeCommands(
   const pending = new Promise<NativeCommand[]>((resolve, reject) => {
     settle = { resolve, reject };
   });
+  // The CLI can exit while spawn or write is still pending; the race below
+  // reports that failure, so it must not also surface as unhandled.
+  pending.catch(() => undefined);
 
   watchChild(
     childId,
@@ -75,7 +78,11 @@ export async function discoverClaudeCommands(
         settle?.reject(new Error(response.error ?? "initialize failed"));
         return;
       }
-      settle?.resolve(claudeCommandsFromInitialize(response.payload));
+      try {
+        settle?.resolve(claudeCommandsFromInitialize(response.payload));
+      } catch (error) {
+        settle?.reject(error instanceof Error ? error : new Error(String(error)));
+      }
     },
     () => settle?.reject(new Error("Claude Code command probe exited")),
   );
