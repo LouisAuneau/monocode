@@ -168,6 +168,8 @@ export function applyClaudePromptEffortPrefix(
 ): string {
   if (effort !== "ultrathink") return text;
   if (!text) return "Ultrathink:";
+  // The CLI only runs a slash command that leads the prompt.
+  if (/^\s*\/[^\s/\\]+(?=\s|$)/.test(text)) return text;
   return `Ultrathink:\n${text}`;
 }
 
