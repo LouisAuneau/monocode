@@ -17,6 +17,8 @@ pub struct DiscoveredSkill {
     pub path: String,
     pub scope: String,
     pub source: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub origin: Option<&'static str>,
 }
 
 struct DisabledFilter {
@@ -164,6 +166,7 @@ pub(crate) fn list_skills_from(
                 scope,
                 "claude",
                 &namespace,
+                "plugin",
                 disabled_filter.as_ref(),
             );
         }
@@ -175,6 +178,7 @@ pub(crate) fn list_skills_from(
                 "user",
                 "claude",
                 &namespace,
+                "plugin",
                 disabled_filter.as_ref(),
             );
         }
@@ -185,6 +189,7 @@ pub(crate) fn list_skills_from(
                 "user",
                 "claude",
                 CLAUDE_SYNCED_SKILLS_NAMESPACE,
+                "synced",
                 disabled_filter.as_ref(),
             );
         }
@@ -201,6 +206,7 @@ fn add_namespaced_root(
     scope: &str,
     source: &str,
     namespace: &str,
+    origin: &'static str,
     disabled_filter: Option<&DisabledFilter>,
 ) {
     if by_name.len() >= MAX_SKILLS {
@@ -214,6 +220,7 @@ fn add_namespaced_root(
             break;
         }
         skill.name = format!("{namespace}:{}", skill.name);
+        skill.origin = Some(origin);
         by_name.entry(skill.name.clone()).or_insert(skill);
     }
 }
@@ -497,6 +504,7 @@ fn scan_root(root: &Path, scope: &str, source: &str) -> Vec<DiscoveredSkill> {
             path: crate::fs::path_to_js(&skill_md),
             scope: scope.to_string(),
             source: source.to_string(),
+            origin: None,
         });
     }
     out
@@ -920,10 +928,15 @@ mod tests {
         assert_eq!(skill.description, "Plan from plugin");
         assert_eq!(skill.source, "claude");
         assert_eq!(skill.scope, "user");
+        assert_eq!(skill.origin, Some("plugin"));
         assert!(skill
             .path
             .ends_with("workflow-kit/1.2.3/skills/quick-plan/SKILL.md"));
-        assert!(skills.iter().any(|skill| skill.name == "quick-plan"));
+        let personal = skills
+            .iter()
+            .find(|skill| skill.name == "quick-plan")
+            .unwrap();
+        assert_eq!(personal.origin, None);
     }
 
     #[test]
@@ -1094,6 +1107,7 @@ mod tests {
         assert_eq!(skill.description, "Work with PDFs");
         assert_eq!(skill.source, "claude");
         assert_eq!(skill.scope, "user");
+        assert_eq!(skill.origin, Some("synced"));
         assert!(!skills
             .iter()
             .any(|skill| skill.name.ends_with("other-account")));
@@ -1142,6 +1156,7 @@ mod tests {
         assert_eq!(skill.description, "Open a PR");
         assert_eq!(skill.source, "claude");
         assert_eq!(skill.scope, "user");
+        assert_eq!(skill.origin, Some("plugin"));
         for hidden in ["opt-in:open-pr", "muted:open-pr", "stale:open-pr"] {
             assert!(!skills.iter().any(|skill| skill.name == hidden), "{hidden}");
         }
