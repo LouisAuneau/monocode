@@ -71,7 +71,7 @@ import {
   type ClaudeControlRequest,
 } from "./claudeProtocol";
 import { isAgentToolName } from "../../core/preview";
-import { leadingClaudeCommand } from "./claudeCommands";
+import { claudePromptText, leadingClaudeCommand } from "./claudeCommands";
 import { joinStreamText, snapshotRemainder } from "../../core/streamText";
 import {
   questionPromptTitle,
@@ -287,7 +287,7 @@ export async function steerClaudeTurn(input: SteerTurnInput): Promise<void> {
 
   const effort = input.modelSettings?.effort;
   const message = buildClaudeUserMessage({
-    text: input.text,
+    text: claudePromptText(input.text),
     attachments: input.attachments,
     effort,
     command: !!leadingClaudeCommand(input.text, {
@@ -584,7 +584,7 @@ async function runTurn(live: Live, input: SendTurnInput): Promise<void> {
     accountId: live.providerAccountId,
   });
   const message = buildClaudeUserMessage({
-    text: input.text,
+    text: claudePromptText(input.text),
     attachments: input.attachments,
     effort,
     command: !!command,
