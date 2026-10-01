@@ -159,7 +159,15 @@ pub(crate) fn list_skills_from(
         if root.is_dir() {
             add_root(root, "user", "antigravity");
         }
-        for (root, scope, namespace) in claude_plugin_skill_roots(home, project) {
+        let plugin_roots = claude_plugin_skill_roots(home, project);
+        let claimed: HashSet<String> = plugin_roots
+            .iter()
+            .flat_map(|(root, _, namespace)| {
+                let manifest = root.parent().and_then(plugin_manifest_name);
+                std::iter::once(namespace.clone()).chain(manifest)
+            })
+            .collect();
+        for (root, scope, namespace) in plugin_roots {
             add_namespaced_root(
                 &mut by_name,
                 root,
@@ -170,8 +178,10 @@ pub(crate) fn list_skills_from(
                 disabled_filter.as_ref(),
             );
         }
-        // Synced plugins lose name conflicts to every other plugin origin.
         for (root, namespace) in claude_synced_plugin_roots(home, project) {
+            if claimed.contains(&namespace) {
+                continue;
+            }
             add_namespaced_root(
                 &mut by_name,
                 root,
@@ -342,6 +352,12 @@ fn claude_synced_plugin_roots(home: &Path, project: &Path) -> Vec<(PathBuf, Stri
     }
     roots.sort();
     roots
+}
+
+fn plugin_manifest_name(plugin: &Path) -> Option<String> {
+    let raw = std::fs::read_to_string(plugin.join(".claude-plugin/plugin.json")).ok()?;
+    let manifest = serde_json::from_str::<serde_json::Value>(&raw).ok()?;
+    Some(manifest.get("name")?.as_str()?.to_string())
 }
 
 /// `<organizationUuid>_<accountUuid>` of the signed-in claude.ai account; the
@@ -1160,6 +1176,49 @@ mod tests {
         for hidden in ["opt-in:open-pr", "muted:open-pr", "stale:open-pr"] {
             assert!(!skills.iter().any(|skill| skill.name == hidden), "{hidden}");
         }
+    }
+
+    #[test]
+    fn installed_plugins_suppress_same_name_synced_plugins() {
+        let project = tmp("proj-claude-synced-conflict");
+        let home = tmp("home-claude-synced-conflict");
+        std::fs::write(
+            home.0.join(".claude.json"),
+            r#"{"oauthAccount":{"organizationUuid":"org-1","accountUuid":"user-1"}}"#,
+        )
+        .unwrap();
+        write_synced_plugin(&home.0, "org-1_user-1", "eng", r#"{"name":"eng"}"#);
+        write_synced_plugin(&home.0, "org-1_user-1", "renamed", r#"{"name":"renamed"}"#);
+        let cache = home.0.join(".claude/plugins/cache/org");
+        write_skill(
+            &cache.join("eng/1/skills"),
+            "plan",
+            "---\nname: plan\ndescription: Plan work\n---\n",
+        );
+        let renamed = cache.join("entry/1");
+        std::fs::create_dir_all(renamed.join(".claude-plugin")).unwrap();
+        std::fs::write(
+            renamed.join(".claude-plugin/plugin.json"),
+            r#"{"name":"renamed"}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            home.0.join(".claude/plugins/installed_plugins.json"),
+            serde_json::to_vec(&serde_json::json!({
+                "version": 2,
+                "plugins": {
+                    "eng@org": [{ "scope": "user", "installPath": cache.join("eng/1") }],
+                    "entry@org": [{ "scope": "user", "installPath": renamed }],
+                }
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+
+        let skills = list_skills_from(&project.0, Some(&home.0), None);
+        assert!(skills.iter().any(|skill| skill.name == "eng:plan"));
+        assert!(!skills.iter().any(|skill| skill.name == "eng:open-pr"));
+        assert!(!skills.iter().any(|skill| skill.name == "renamed:open-pr"));
     }
 
     #[test]
