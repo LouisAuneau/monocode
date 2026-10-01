@@ -33,6 +33,12 @@ export type NativeCommandProvider = {
    * offered.
    */
   monocodeSkills?: boolean;
+  /**
+   * Runs while a new turn's prompt is prepared, before it reaches the harness,
+   * so a stop meanwhile still wins. Steers skip it: a wait there could outlast
+   * the turn they target.
+   */
+  beforeSend?(text: string, context: CommandContext & { effort?: string }): Promise<void>;
 };
 
 const RESERVED_COMMANDS = new Set(["plan", "compact", "add-to-folder"]);

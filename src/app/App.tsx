@@ -6340,7 +6340,7 @@ function Workspace({
               sessionId,
               cwd: initialWorkCwd,
               ...(providerAccountId ? { accountId: providerAccountId } : {}),
-            });
+            }, { steer: true });
             await steerHarnessTurn({
               harness: current.harness,
               sessionId,
@@ -6925,7 +6925,12 @@ function Workspace({
                   ...(providerAccountId
                     ? { accountId: providerAccountId }
                     : {}),
-                });
+                }, { effort: current.modelSettings?.effort });
+          // Preparing can wait on the harness; a stop meanwhile wins.
+          if (turnGen.current.get(sessionId) !== gen) {
+            recoverEditedResend();
+            return;
+          }
           const turnPrompt = proposalDraft
             ? options?.orchestrationRetry?.response
               ? orchestrationRepairPrompt({
