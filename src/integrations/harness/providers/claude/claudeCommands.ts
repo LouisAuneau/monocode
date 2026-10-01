@@ -6,9 +6,11 @@ import {
   watchChild,
   writeChild,
 } from "../../core/child";
-import type {
-  NativeCommand,
-  NativeCommandProvider,
+import {
+  nativeCommandInvocation,
+  nativeCommandPrompt,
+  type NativeCommand,
+  type NativeCommandProvider,
 } from "../../core/nativeCommands";
 import {
   asRecord,
@@ -27,18 +29,11 @@ const SEND_PROBE_TIMEOUT_MS = 5_000;
 const ABSENT_TTL_MS = 30_000;
 
 /**
- * Commands MonoCode already owns (its own picker entries, or session state
- * such as the model and thread it tracks), plus CLI internals.
+ * Commands that change session state MonoCode tracks itself (the thread,
+ * model, effort, title, usage), plus CLI internals. Commands that only share
+ * a name with MonoCode's own are namespaced instead, like omp's.
  */
 const HIDDEN_COMMANDS = new Set([
-  "add-to-folder",
-  "btw",
-  "compact",
-  "draft",
-  "mcp",
-  "operator",
-  "orchestrator",
-  "plan",
   "clear",
   "color",
   "config",
@@ -47,6 +42,7 @@ const HIDDEN_COMMANDS = new Set([
   "heapdump",
   "model",
   "rename",
+  "usage",
   "workflow-launch-exec",
 ]);
 
@@ -122,8 +118,13 @@ async function refreshLeadingCommand(
   else absent.set(name, Date.now());
 }
 
+/** A namespaced pick such as `/claude:compact` reaches the CLI as `/compact`. */
+export function claudePromptText(text: string): string {
+  return nativeCommandPrompt("claude", text);
+}
+
 function leadingName(text: string): string | undefined {
-  return /^\s*\/([^\s/\\]+)(?=\s|$)/.exec(text)?.[1];
+  return /^\s*\/([^\s/\\]+)(?=\s|$)/.exec(claudePromptText(text))?.[1];
 }
 
 /** Ask a throwaway CLI in `cwd` for the commands its `initialize` reports. */
@@ -241,7 +242,7 @@ export function claudeCommandsFromInitialize(
     return [
       {
         name,
-        invocation: name,
+        invocation: nativeCommandInvocation("claude", name),
         source: "claude",
         description:
           typeof row?.description === "string" ? row.description : "",

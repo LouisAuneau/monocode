@@ -22,6 +22,7 @@ vi.mock("../../core/child", () => ({
 
 import {
   claudeCommandProvider,
+  claudePromptText,
   claudeCommandsFromInitialize,
   discoverClaudeCommands,
   leadingClaudeCommand,
@@ -72,21 +73,41 @@ describe("claudeCommandsFromInitialize", () => {
     ]);
   });
 
-  it("hides commands MonoCode owns, internals, and duplicates", () => {
+  it("hides commands that change state MonoCode tracks, internals, and duplicates", () => {
     const commands = claudeCommandsFromInitialize({
       commands: [
-        { name: "compact" },
         { name: "clear", aliases: ["reset", "new"] },
         { name: "model" },
+        { name: "usage", aliases: ["cost", "stats"] },
         { name: "__remote-workflow" },
         { name: "bad name" },
         { name: "init" },
         { name: "init" },
-        { name: "usage", aliases: ["cost", "plan", "a b"] },
+        { name: "doctor", aliases: ["checkup", "a b", "model"] },
       ],
     });
-    expect(commands.map((command) => command.name)).toEqual(["init", "usage"]);
-    expect(commands[1]?.aliases).toEqual(["cost"]);
+    expect(commands.map((command) => command.name)).toEqual(["init", "doctor"]);
+    expect(commands[1]?.aliases).toEqual(["checkup"]);
+  });
+
+  it("namespaces commands that share a name with MonoCode's own, like omp", () => {
+    const commands = claudeCommandsFromInitialize({
+      commands: [{ name: "compact" }, { name: "mcp" }, { name: "init" }],
+    });
+    expect(commands.map((command) => command.invocation)).toEqual([
+      "claude:compact",
+      "claude:mcp",
+      "init",
+    ]);
+  });
+
+  it("sends a namespaced pick to the CLI under its own name", () => {
+    expect(claudePromptText("/claude:compact keep the plan")).toBe(
+      "/compact keep the plan",
+    );
+    expect(claudePromptText("/claude:mcp reconnect")).toBe("/mcp reconnect");
+    expect(claudePromptText("/claude:init")).toBe("/claude:init");
+    expect(claudePromptText("see /claude:compact")).toBe("see /claude:compact");
   });
 
   it("rejects a payload without commands", () => {

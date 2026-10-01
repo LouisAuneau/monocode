@@ -41,7 +41,16 @@ export type NativeCommandProvider = {
   beforeSend?(text: string, context: CommandContext & { effort?: string }): Promise<void>;
 };
 
-const RESERVED_COMMANDS = new Set(["plan", "compact", "add-to-folder"]);
+/** MonoCode's own command names; a native command using one is namespaced. */
+const RESERVED_COMMANDS = new Set([
+  "add-to-folder",
+  "btw",
+  "compact",
+  "draft",
+  "mcp",
+  "orchestrator",
+  "plan",
+]);
 
 export function nativeCommandInvocation(
   harness: HarnessId,
