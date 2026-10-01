@@ -121,6 +121,8 @@ export type SkillCatalogContext = {
   harness: HarnessId;
   cwd: string;
   sessionId?: string;
+  /** Provider account; its config can carry its own commands and skills. */
+  accountId?: string;
 };
 
 type CatalogRequest = {
@@ -141,7 +143,7 @@ const catalogEntries = new Map<string, CatalogEntry>();
 
 export function skillCatalogKey(context: SkillCatalogContext): string {
   const sessionScoped = !!getHarness(context.harness)?.commands?.subscribe;
-  return `${context.harness}\0${normalizeProjectPath(context.cwd)}${sessionScoped && context.sessionId ? `\0${context.sessionId}` : ""}`;
+  return `${context.harness}\0${normalizeProjectPath(context.cwd)}${context.accountId ? `\0account:${context.accountId}` : ""}${sessionScoped && context.sessionId ? `\0${context.sessionId}` : ""}`;
 }
 
 export function hasNativeCommands(harness: HarnessId): boolean {
@@ -211,6 +213,7 @@ export function loadSkills(
     harness: context.harness,
     cwd: normalizeProjectPath(context.cwd),
     ...(context.sessionId ? { sessionId: context.sessionId } : {}),
+    ...(context.accountId ? { accountId: context.accountId } : {}),
   } satisfies SkillCatalogContext;
   const key = skillCatalogKey(normalized);
   let entry = catalogEntries.get(key);

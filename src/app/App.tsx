@@ -1507,7 +1507,7 @@ function Workspace({
   useEffect(() => {
     if (!activeSkillContext || !activeSkillCwd) return;
     warmNativeSkills(activeSkillContext);
-  }, [activeSkillCwd, active?.id, active?.harness]);
+  }, [activeSkillCwd, activeSkillContext?.accountId, active?.id, active?.harness]);
 
   const activeFile = activeTab ? focusedFileTab(activeTab) : undefined;
   const sidebarCwd =
@@ -6183,6 +6183,7 @@ function Workspace({
               harness: current.harness,
               sessionId,
               cwd: initialWorkCwd,
+              ...(providerAccountId ? { accountId: providerAccountId } : {}),
             });
             await steerHarnessTurn({
               harness: current.harness,
@@ -6761,6 +6762,9 @@ function Workspace({
                   harness: current.harness,
                   sessionId,
                   cwd: workCwd,
+                  ...(providerAccountId
+                    ? { accountId: providerAccountId }
+                    : {}),
                 });
           const turnPrompt = proposalDraft
             ? options?.orchestrationRetry?.response
