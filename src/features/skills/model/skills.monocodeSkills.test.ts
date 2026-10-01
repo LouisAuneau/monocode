@@ -1,4 +1,5 @@
 const mocks = vi.hoisted(() => ({
+  beforeSend: vi.fn(),
   discover: vi.fn(),
   listSkills: vi.fn(),
 }));
@@ -8,6 +9,7 @@ vi.mock("../../../integrations/harness/core/registry", () => ({
     id === "claude"
       ? {
           commands: {
+            beforeSend: mocks.beforeSend,
             discover: mocks.discover,
             monocodeSkills: true,
           },
@@ -25,6 +27,7 @@ import {
   applySkillsToTurn,
   invalidateSkills,
   loadSkills,
+  prepareNativeCommand,
 } from "./skills";
 import { CREATE_SKILL_BODY } from "./createSkill";
 
@@ -159,5 +162,19 @@ describe("native catalog with MonoCode skill settings", () => {
       }),
     ).resolves.toContain(CREATE_SKILL_BODY.trim());
     expect(mocks.discover).not.toHaveBeenCalled();
+  });
+
+  it("skips the pre-send check for MonoCode's own create-skill", async () => {
+    mocks.beforeSend.mockResolvedValue(undefined);
+    const context = { harness: "claude" as const, cwd: "/repo" };
+
+    await prepareNativeCommand("/create-skill for deploys", context, "ultrathink");
+    expect(mocks.beforeSend).not.toHaveBeenCalled();
+
+    await prepareNativeCommand("/create-skills-later", context, "ultrathink");
+    expect(mocks.beforeSend).toHaveBeenCalledWith("/create-skills-later", {
+      cwd: "/repo",
+      effort: "ultrathink",
+    });
   });
 });
