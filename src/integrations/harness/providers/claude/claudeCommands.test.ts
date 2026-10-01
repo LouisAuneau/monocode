@@ -139,4 +139,18 @@ describe("discoverClaudeCommands", () => {
     await expect(discoverClaudeCommands("/repo")).rejects.toThrow(/exited/);
     expect(mocks.killChild).toHaveBeenCalled();
   });
+
+  it("leaves no unhandled rejection when the CLI exits before the write fails", async () => {
+    const unhandled = vi.fn();
+    process.on("unhandledRejection", unhandled);
+    mocks.writeChild.mockImplementation(async () => {
+      mocks.onExit?.();
+      throw new Error("pipe closed");
+    });
+
+    await expect(discoverClaudeCommands("/repo")).rejects.toThrow(/pipe closed/);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    process.off("unhandledRejection", unhandled);
+    expect(unhandled).not.toHaveBeenCalled();
+  });
 });
