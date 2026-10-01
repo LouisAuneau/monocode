@@ -47,12 +47,13 @@ const HIDDEN_COMMANDS = new Set([
 
 export const claudeCommandProvider: NativeCommandProvider = {
   monocodeSkills: true,
-  discover: ({ cwd }) => discoverClaudeCommands(cwd),
+  discover: ({ cwd, accountId }) => discoverClaudeCommands(cwd, accountId),
 };
 
 /** Ask a throwaway CLI in `cwd` for the commands its `initialize` reports. */
 export async function discoverClaudeCommands(
   cwd: string,
+  accountId?: string,
 ): Promise<NativeCommand[]> {
   const { path } = await resolveClaudeBinary();
   const childId = `monocode-claude-commands-${crypto.randomUUID()}`;
@@ -101,7 +102,14 @@ export async function discoverClaudeCommands(
       "--mcp-config",
       JSON.stringify({ mcpServers: {} }),
     );
-    await spawnChild(childId, path, args, cwd, undefined, "claude");
+    await spawnChild(
+      childId,
+      path,
+      args,
+      cwd,
+      { provider: "claude", id: accountId ?? "default" },
+      "claude",
+    );
     await writeChild(
       childId,
       JSON.stringify(

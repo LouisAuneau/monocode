@@ -121,8 +121,9 @@ describe("discoverClaudeCommands", () => {
         description: "",
       },
     ]);
-    const [, , args, cwd] = mocks.spawnChild.mock.calls[0] ?? [];
+    const [, , args, cwd, account] = mocks.spawnChild.mock.calls[0] ?? [];
     expect(cwd).toBe("/repo");
+    expect(account).toEqual({ provider: "claude", id: "default" });
     expect(args).toContain("--no-session-persistence");
     expect(args).toContain("--strict-mcp-config");
     expect(args.join(" ")).toContain('"disableAllHooks":true');
@@ -131,6 +132,18 @@ describe("discoverClaudeCommands", () => {
     });
     expect(mocks.killChild).toHaveBeenCalled();
     expect(mocks.unwatchChild).toHaveBeenCalled();
+  });
+
+  it("runs the probe under the session's account", async () => {
+    mocks.writeChild.mockImplementation(async () => {
+      mocks.onLine?.(initializeResponse({ commands: [] }));
+    });
+
+    await discoverClaudeCommands("/repo", "work");
+    expect(mocks.spawnChild.mock.calls[0]?.[4]).toEqual({
+      provider: "claude",
+      id: "work",
+    });
   });
 
   it("fails when the CLI exits before answering", async () => {
