@@ -1425,7 +1425,7 @@ export function Composer({
       }
       setFileDrag(false);
       if (!over || !attachmentsSupported) return;
-      void attachmentsFromPaths([detail.path]).then(addAttachments);
+      void attachmentsFromPaths(detail.paths).then(addAttachments);
     };
 
     const root = dropRoot();
