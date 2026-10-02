@@ -22,6 +22,7 @@ const {
   directories,
   clipboardFiles,
   copied,
+  moved,
   deleted,
   dragDrop,
   platform,
@@ -30,6 +31,7 @@ const {
   directories: new Map<string, FsEntry[]>(),
   clipboardFiles: [] as string[],
   copied: [] as { from: string; destParent: string }[],
+  moved: [] as string[],
   deleted: [] as string[],
   dragDrop: {
     handler: null as null | ((event: { payload: unknown }) => void),
@@ -55,6 +57,11 @@ vi.mock("@tauri-apps/api/core", () => ({
     if (command === "copy_path") {
       if (args.from.includes("locked")) throw new Error("Permission denied");
       copied.push({ from: args.from, destParent: args.destParent });
+      return `${args.destParent}/${args.from.split("/").pop()}`;
+    }
+    if (command === "move_path") {
+      if (args.from.endsWith("/b.ts")) throw new Error("Permission denied");
+      moved.push(args.from);
       return `${args.destParent}/${args.from.split("/").pop()}`;
     }
     if (command === "delete_path") {
@@ -154,6 +161,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
   clipboardFiles.length = 0;
   copied.length = 0;
+  moved.length = 0;
   deleted.length = 0;
   platform.mac = true;
 });
@@ -732,6 +740,21 @@ describe("FileTree multi-selection", () => {
     ]);
   });
 
+  it("keeps cut files that failed to move for another Paste", async () => {
+    await click("a.ts");
+    await click("b.ts", { metaKey: true });
+    await press(row("b.ts"), { key: "x", metaKey: true });
+    await click("docs");
+    await pressPaste(row("docs"));
+    expect(moved).toEqual([`${cwd}/a.ts`]);
+    expect(container.textContent).toContain("Permission denied");
+    expect(isCut("b.ts")).toBe(true);
+
+    await pressPaste(row("docs"));
+    expect(moved).toEqual([`${cwd}/a.ts`]);
+    expect(isCut("b.ts")).toBe(true);
+  });
+
   it("copies every selected path on Mod+Shift+C, one per line", async () => {
     await click("a.ts");
     await click("src", { metaKey: true });
@@ -840,6 +863,17 @@ describe("FileTree multi-selection", () => {
     });
     expect(preview).toContain("+1");
     expect(selected()).toEqual(["src", "a.ts", "c.ts"]);
+  });
+
+  it("drags files selected inside a selected folder", async () => {
+    await click("docs", { metaKey: true });
+    await click("docs/readme.md", { metaKey: true });
+    await click("a.ts", { metaKey: true });
+    const { drop } = drag("docs/readme.md");
+    expect(drop?.type === "drop" && drop.paths).toEqual([
+      `${cwd}/docs/readme.md`,
+      `${cwd}/a.ts`,
+    ]);
   });
 
   it("drags only the grabbed file when it is outside the selection", async () => {

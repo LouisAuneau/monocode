@@ -454,8 +454,10 @@ export const FileTree = memo(function FileTree({
       active = true;
       // Dragging a row outside the selection drags that row alone, as Finder.
       if (!sel.isSelected(path)) sel.select(path, undefined, "single");
-      paths = topLevelPaths(sel.targetsFor(path)).filter(
-        (p) => !isDirAt(cwd, p),
+      // Folders aren't draggable: drop them first, so files selected inside a
+      // selected folder still come along.
+      paths = topLevelPaths(
+        sel.targetsFor(path).filter((p) => !isDirAt(cwd, p)),
       );
       onSelect(path);
       restoreSelection = suppressTextSelection();
@@ -701,7 +703,9 @@ export const FileTree = memo(function FileTree({
           remapTreePaths(from, to);
           onFileMoved?.(from, to);
         }
-        setClip(null);
+        // Keep what failed to move on the clipboard so Paste can retry it.
+        const left = paths.filter((path) => !created.has(path));
+        setClip(left.length ? { mode, paths: left } : null);
       } else {
         await refreshTouched([destParent]);
       }
