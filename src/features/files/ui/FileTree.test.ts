@@ -53,6 +53,7 @@ vi.mock("@tauri-apps/api/core", () => ({
     if (command === "list_dir") return directories.get(args.path) ?? [];
     if (command === "clipboard_file_paths") return [...clipboardFiles];
     if (command === "copy_path") {
+      if (args.from.includes("locked")) throw new Error("Permission denied");
       copied.push({ from: args.from, destParent: args.destParent });
       return `${args.destParent}/${args.from.split("/").pop()}`;
     }
@@ -272,6 +273,22 @@ describe("FileTree accepts files from outside the tree", () => {
     ]);
   });
 
+  it("keeps pasting past a failed clipboard file and reports it", async () => {
+    clipboardFiles.push(
+      "/Users/me/Desktop/a.txt",
+      "/Users/me/Desktop/locked.txt",
+      "/Users/me/Desktop/b.txt",
+    );
+    saveSelected(cwd, `${cwd}/docs`);
+    await act(async () => render());
+    await pressPaste(row("docs"));
+    expect(copied).toEqual([
+      { from: "/Users/me/Desktop/a.txt", destParent: `${cwd}/docs` },
+      { from: "/Users/me/Desktop/b.txt", destParent: `${cwd}/docs` },
+    ]);
+    expect(container.textContent).toContain("Permission denied");
+  });
+
   it("pastes into the parent folder when a file is selected", async () => {
     clipboardFiles.push("/Users/me/Desktop/a.txt");
     saveSelected(cwd, `${cwd}/first.ts`);
@@ -456,11 +473,11 @@ describe("FileTree starts Explorer file drags", () => {
     expect(events.slice(-2)).toEqual([
       {
         type: "drop",
-        path: `${cwd}/first.ts`,
+        paths: [`${cwd}/first.ts`],
         x: 40,
         y: 40,
       },
-      { type: "end", path: `${cwd}/first.ts` },
+      { type: "end", paths: [`${cwd}/first.ts`] },
     ]);
     expect(props.onOpenFile).not.toHaveBeenCalled();
 
@@ -768,5 +785,69 @@ describe("FileTree multi-selection", () => {
     expect(selected()).toEqual(["docs"]);
     await click("a.ts", { metaKey: true });
     expect(selected()).toEqual(["docs", "a.ts"]);
+  });
+
+  function drag(name: string) {
+    const events: ExplorerFilePointerDragDetail[] = [];
+    const onDrag = (event: Event) => {
+      events.push((event as CustomEvent<ExplorerFilePointerDragDetail>).detail);
+    };
+    window.addEventListener(EXPLORER_FILE_POINTER_DRAG_EVENT, onDrag);
+    act(() => {
+      row(name).dispatchEvent(
+        new PointerEvent("pointerdown", {
+          button: 0,
+          pointerId: 1,
+          clientX: 10,
+          clientY: 10,
+          bubbles: true,
+        }),
+      );
+      window.dispatchEvent(
+        new PointerEvent("pointermove", {
+          pointerId: 1,
+          clientX: 30,
+          clientY: 30,
+        }),
+      );
+    });
+    const preview = document.querySelector(
+      ".explorer-file-drag-preview",
+    )?.textContent;
+    act(() => {
+      window.dispatchEvent(
+        new PointerEvent("pointerup", {
+          pointerId: 1,
+          clientX: 30,
+          clientY: 30,
+        }),
+      );
+    });
+    window.removeEventListener(EXPLORER_FILE_POINTER_DRAG_EVENT, onDrag);
+    return { drop: events.find((e) => e.type === "drop"), preview };
+  }
+
+  it("drags every selected file when grabbing a selected row", async () => {
+    await click("a.ts");
+    await click("src", { metaKey: true });
+    await click("c.ts", { metaKey: true });
+    const { drop, preview } = drag("c.ts");
+    expect(drop).toEqual({
+      type: "drop",
+      paths: [`${cwd}/a.ts`, `${cwd}/c.ts`],
+      x: 30,
+      y: 30,
+    });
+    expect(preview).toContain("+1");
+    expect(selected()).toEqual(["src", "a.ts", "c.ts"]);
+  });
+
+  it("drags only the grabbed file when it is outside the selection", async () => {
+    await click("a.ts");
+    await click("b.ts", { metaKey: true });
+    const { drop, preview } = drag("c.ts");
+    expect(drop?.type === "drop" && drop.paths).toEqual([`${cwd}/c.ts`]);
+    expect(preview).not.toContain("+");
+    expect(selected()).toEqual(["c.ts"]);
   });
 });

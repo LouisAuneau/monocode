@@ -374,6 +374,8 @@ export const FileTree = memo(function FileTree({
     let lastX = startX;
     let lastY = startY;
     let active = false;
+    // Set on activation: the grabbed file, or every selected file with it.
+    let paths = [path];
     let restoreSelection: (() => void) | undefined;
     let preview: HTMLDivElement | null = null;
 
@@ -408,6 +410,12 @@ export const FileTree = memo(function FileTree({
       const label = handle.children.item(2)?.cloneNode(true);
       if (icon) preview.append(icon);
       if (label) preview.append(label);
+      if (paths.length > 1) {
+        const count = document.createElement("span");
+        count.classList.add("explorer-file-drag-count");
+        count.textContent = `+${paths.length - 1}`;
+        preview.append(count);
+      }
 
       document.body.append(preview);
       movePreview();
@@ -438,12 +446,17 @@ export const FileTree = memo(function FileTree({
       window.removeEventListener("keydown", onKey);
       window.removeEventListener("blur", onCancel);
       release();
-      if (active) emitExplorerFilePointerDrag({ type: "end", path });
+      if (active) emitExplorerFilePointerDrag({ type: "end", paths });
       fileDragCleanup.current = null;
     };
 
     const activate = () => {
       active = true;
+      // Dragging a row outside the selection drags that row alone, as Finder.
+      if (!sel.isSelected(path)) sel.select(path, undefined, "single");
+      paths = topLevelPaths(sel.targetsFor(path)).filter(
+        (p) => !isDirAt(cwd, p),
+      );
       onSelect(path);
       restoreSelection = suppressTextSelection();
       setGrabbing(true);
@@ -467,7 +480,7 @@ export const FileTree = memo(function FileTree({
       }
       moveEvent.preventDefault();
       movePreview();
-      emitExplorerFilePointerDrag({ type: "move", path, x: lastX, y: lastY });
+      emitExplorerFilePointerDrag({ type: "move", paths, x: lastX, y: lastY });
     }
 
     function finish(commit: boolean, upEvent?: PointerEvent) {
@@ -477,7 +490,7 @@ export const FileTree = memo(function FileTree({
         if (commit) {
           emitExplorerFilePointerDrag({
             type: "drop",
-            path,
+            paths,
             x: lastX,
             y: lastY,
           });
@@ -645,15 +658,16 @@ export const FileTree = memo(function FileTree({
 
   const copyExternalFiles = async (paths: string[], destParent: string) => {
     let created: string | null = null;
-    try {
-      for (const from of paths) created = await copyPath(from, destParent);
-    } finally {
-      if (created) {
-        await refreshTouched([destParent]);
-        expandDirs([destParent]);
-        focusPath(created);
-      }
+    const { failed } = await runSequential(paths, async (from) => {
+      created = await copyPath(from, destParent);
+    });
+    if (created) {
+      await refreshTouched([destParent]);
+      expandDirs([destParent]);
+      focusPath(created);
     }
+    const error = bulkError(failed);
+    if (error) throw error;
   };
 
   const pasteAt = async (targetPath: string) => {
