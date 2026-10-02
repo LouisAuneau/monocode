@@ -27,6 +27,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type MouseEvent,
   type ReactNode,
 } from "react";
 import { FileTypeIcon } from "../../files/ui/FileTypeIcon";
@@ -79,7 +80,14 @@ import { MOD } from "../../../platform/tauri/platform";
 import { applyProjectDiffStats } from "../hooks/useProjectDiffStats";
 import { useLockOverscroll } from "../../../shared/hooks/useLockOverscroll";
 import { isRemoteProjectPath } from "../../projects/model/recents";
-import { buildChangeTree, type ChangeDir } from "../model/changeTree";
+import {
+  buildChangeTree,
+  visibleChangeOrder,
+  type ChangeDir,
+} from "../model/changeTree";
+import { useMultiSelection } from "../../../shared/hooks/useMultiSelection";
+import type { SelectMode } from "../../../shared/lib/multiSelection";
+import { runSequential } from "../../../shared/lib/concurrent";
 
 const GIT_POLL_MS = 2000;
 
@@ -99,6 +107,7 @@ let changesView: ChangesView = loadChangesView();
 const collapsedDirs = new Set<string>();
 const indexByCwd = new Map<string, GitDiffIndex>();
 const prByCwd = new Map<string, GitPr | null>();
+const NO_PATHS: ReadonlySet<string> = new Set();
 
 type AmendTarget = { branch: string | null; head: string | null };
 
@@ -404,6 +413,59 @@ function ChangedFiles({
     canCommit && hasRemote && !diverged && (!amend || !index?.headPushed);
   const canCommitPushPr = canCommitPush && !hasOpenPr && !onDefault;
   const canEditMessage = (staged.length > 0 || amend) && !busy;
+  // Rows a bulk stage/unstage/discard is running on.
+  const [busyFiles, setBusyFiles] = useState<ReadonlySet<string>>(NO_PATHS);
+  const isBusy = (relative: string) =>
+    busy === relative || busyFiles.has(relative);
+
+  // Multi-selection: scope is the section kind, ids are repo-relative paths.
+  const visibleOrder = (scope: string): string[] => {
+    const open = scope === "staged" ? stagedExpanded : changesExpanded;
+    if (!open) return [];
+    return visibleChangeOrder(
+      scope === "staged" ? staged : unstaged,
+      view,
+      (path) => collapsedDirs.has(`${scope}:${path}`),
+    );
+  };
+  const {
+    selection,
+    onRowClick,
+    isSelected,
+    targetsFor,
+    clear: clearSelection,
+    prune: pruneSelection,
+    onKeyDown: onSelectionKeyDown,
+  } = useMultiSelection({
+    visibleOrder,
+    fallbackAnchor: (scope) =>
+      selected && (!selectedKind || selectedKind === scope) ? selected : null,
+  });
+  const selectionRef = useRef(selection);
+  selectionRef.current = selection;
+  const pruneHiddenRef = useRef(() => {});
+  // Keeps the selection to rows that are still on screen.
+  pruneHiddenRef.current = () => {
+    const scope = selectionRef.current.scope;
+    if (scope === null) return;
+    const visible = new Set(visibleOrder(scope));
+    pruneSelection((id) => visible.has(id));
+  };
+  const pruneHidden = useCallback(() => pruneHiddenRef.current(), []);
+
+  useEffect(() => {
+    pruneHidden();
+  }, [staged, unstaged, view, stagedExpanded, changesExpanded, pruneHidden]);
+
+  // Opening a file outside the selection (e.g. from elsewhere) drops it.
+  useEffect(() => {
+    const current = selectionRef.current;
+    const inSelection =
+      !!selected &&
+      current.ids.includes(selected) &&
+      (!selectedKind || selectedKind === current.scope);
+    if (!inSelection) clearSelection();
+  }, [selected, selectedKind, clearSelection]);
 
   useEffect(() => {
     if (!amendTarget) return;
@@ -502,6 +564,63 @@ function ChangedFiles({
       fail(error);
     } finally {
       setBusy(null);
+    }
+  };
+
+  /** Runs a row action on the selection when the row is in it, else on the row. */
+  const runTargets = (
+    file: GitChangedFile,
+    kind: GitFileDiffKind,
+    action: "stage" | "unstage" | "discard",
+  ) => {
+    const ids = new Set(targetsFor(file.relative, kind));
+    if (ids.size <= 1) return run(file, action);
+    const list = kind === "staged" ? staged : unstaged;
+    const byPath = new Map(list.map((f) => [f.relative, f]));
+    const targets = visibleOrder(kind)
+      .filter((id) => ids.has(id))
+      .flatMap((id) => byPath.get(id) ?? []);
+    return runMany(targets, action);
+  };
+
+  const runMany = async (
+    targets: GitChangedFile[],
+    action: "stage" | "unstage" | "discard",
+  ) => {
+    if (busy || targets.length === 0) return;
+    if (action === "discard") {
+      const n = targets.length;
+      const untracked = targets.filter((f) => f.status === "untracked").length;
+      const ok = await confirmNative(
+        `Discard changes in ${n} files? This cannot be undone.${
+          untracked
+            ? ` ${untracked} untracked file${untracked === 1 ? "" : "s"} will be deleted.`
+            : ""
+        }`,
+        "Discard",
+      );
+      if (!ok) return;
+    }
+    setBusy("files");
+    setBusyFiles(new Set(targets.map((f) => f.relative)));
+    try {
+      // One at a time: git commands contend for the index lock.
+      const { done, failed } = await runSequential(targets, (f) =>
+        action === "stage"
+          ? gitStageFile(cwd, f.relative)
+          : action === "unstage"
+            ? gitUnstageFile(cwd, f.relative)
+            : gitDiscardFile(cwd, f.relative),
+      );
+      if (done.length) onMutated(done.map((f) => f.path));
+      if (failed.length) {
+        const first = failed[0].error;
+        const reason = first instanceof Error ? first.message : String(first);
+        fail(`${reason} (${failed.length} of ${targets.length} files failed)`);
+      }
+    } finally {
+      setBusy(null);
+      setBusyFiles(NO_PATHS);
     }
   };
 
@@ -831,7 +950,11 @@ function ChangedFiles({
       </div>
       <div
         ref={lockOverscroll}
-        className="min-h-0 flex-1 overflow-y-auto overscroll-none py-1"
+        // Focusable so Escape / Mod+A reach it after clicking a row (WebKit
+        // doesn't focus buttons on click).
+        tabIndex={-1}
+        onKeyDown={(event) => onSelectionKeyDown(event)}
+        className="min-h-0 flex-1 overflow-y-auto overscroll-none py-1 outline-none"
       >
         {files.length === 0 ? (
           <p className="px-3 py-2 text-[12px] text-content/45">
@@ -873,9 +996,14 @@ function ChangedFiles({
                   kind="staged"
                   selected={selected}
                   selectedKind={selectedKind}
-                  busy={busy}
+                  isBusy={isBusy}
+                  isSelected={isSelected}
+                  onRowClick={onRowClick}
+                  onCollapse={pruneHidden}
                   onOpenFile={onOpenFile}
-                  onAction={run}
+                  onAction={(file, action) =>
+                    void runTargets(file, "staged", action)
+                  }
                 />
               </FileSection>
             ) : null}
@@ -914,9 +1042,14 @@ function ChangedFiles({
                   kind="unstaged"
                   selected={selected}
                   selectedKind={selectedKind}
-                  busy={busy}
+                  isBusy={isBusy}
+                  isSelected={isSelected}
+                  onRowClick={onRowClick}
+                  onCollapse={pruneHidden}
                   onOpenFile={onOpenFile}
-                  onAction={run}
+                  onAction={(file, action) =>
+                    void runTargets(file, "unstaged", action)
+                  }
                 />
               </FileSection>
             ) : null}
@@ -1223,13 +1356,24 @@ type ChangeRowProps = {
   kind: GitFileDiffKind;
   selected?: string;
   selectedKind?: GitFileDiffKind;
-  busy: string | null;
+  isBusy: (relative: string) => boolean;
+  /** Whether a row is in the multi-selection. */
+  isSelected: (relative: string, kind: GitFileDiffKind) => boolean;
+  onRowClick: SelectionClick;
+  /** A tree folder collapsed, hiding its rows. */
+  onCollapse: () => void;
   onOpenFile: (path: string, kind: GitFileDiffKind, pin?: boolean) => void;
   onAction: (
     file: GitChangedFile,
     action: "stage" | "unstage" | "discard",
   ) => void;
 };
+
+type SelectionClick = (
+  event: MouseEvent,
+  relative: string,
+  kind: GitFileDiffKind,
+) => SelectMode;
 
 export function ChangeList({ files, view, ...rest }: ChangeRowProps) {
   const tree = useMemo(() => buildChangeTree(files), [files]);
@@ -1243,8 +1387,10 @@ export function ChangeList({ files, view, ...rest }: ChangeRowProps) {
           key={`${rest.kind}:${file.relative}`}
           file={file}
           active={isActive(file, rest.selected, rest.selectedKind, rest.kind)}
-          busy={rest.busy === file.relative}
+          inSelection={rest.isSelected(file.relative, rest.kind)}
+          busy={rest.isBusy(file.relative)}
           kind={rest.kind}
+          onRowClick={rest.onRowClick}
           onOpenFile={rest.onOpenFile}
           onAction={rest.onAction}
         />
@@ -1259,7 +1405,10 @@ function ChangeDirChildren({
   kind,
   selected,
   selectedKind,
-  busy,
+  isBusy,
+  isSelected,
+  onRowClick,
+  onCollapse,
   onOpenFile,
   onAction,
 }: Omit<ChangeRowProps, "files" | "view"> & {
@@ -1276,7 +1425,10 @@ function ChangeDirChildren({
           kind={kind}
           selected={selected}
           selectedKind={selectedKind}
-          busy={busy}
+          isBusy={isBusy}
+          isSelected={isSelected}
+          onRowClick={onRowClick}
+          onCollapse={onCollapse}
           onOpenFile={onOpenFile}
           onAction={onAction}
         />
@@ -1286,9 +1438,11 @@ function ChangeDirChildren({
           key={`${kind}:${file.relative}`}
           file={file}
           active={isActive(file, selected, selectedKind, kind)}
-          busy={busy === file.relative}
+          inSelection={isSelected(file.relative, kind)}
+          busy={isBusy(file.relative)}
           kind={kind}
           depth={depth}
+          onRowClick={onRowClick}
           onOpenFile={onOpenFile}
           onAction={onAction}
         />
@@ -1312,6 +1466,7 @@ function ChangeDirRow({
     if (open) collapsedDirs.add(key);
     else collapsedDirs.delete(key);
     setOpen(!open);
+    if (open) rest.onCollapse();
   };
   return (
     <li>
@@ -1369,18 +1524,22 @@ function isActive(
 function ChangeRow({
   file,
   active,
+  inSelection,
   busy,
   kind,
   depth,
+  onRowClick,
   onOpenFile,
   onAction,
 }: {
   file: GitChangedFile;
   active: boolean;
+  inSelection: boolean;
   busy: boolean;
   kind: GitFileDiffKind;
   /** Set in tree view: nesting level, and the folder path moves to the tree. */
   depth?: number;
+  onRowClick: SelectionClick;
   onOpenFile: (path: string, kind: GitFileDiffKind, pin?: boolean) => void;
   onAction: (
     file: GitChangedFile,
@@ -1391,14 +1550,15 @@ function ChangeRow({
   const tree = depth !== undefined;
   const dir = tree ? "" : dirname(file.relative);
   const canOpen = file.status !== "deleted";
+  const highlighted = active || inSelection;
   return (
-    <li>
+    <li data-selected={inSelection || undefined}>
       <div
         style={tree ? { paddingLeft: 8 + depth * 12 } : undefined}
         className={`group flex h-7 w-full items-center gap-1 pr-2 leading-none ${
           tree ? "" : "pl-2"
         } ${
-          active
+          highlighted
             ? "bg-selection text-content"
             : "text-content hover:bg-content/5"
         }`}
@@ -1406,8 +1566,13 @@ function ChangeRow({
         <button
           type="button"
           title={file.relative}
-          onClick={() => {
-            if (canOpen) onOpenFile(file.path, kind);
+          // Keep Shift-click from selecting the row text.
+          onMouseDown={(event) => {
+            if (event.shiftKey) event.preventDefault();
+          }}
+          onClick={(event) => {
+            const mode = onRowClick(event, file.relative, kind);
+            if (mode === "single" && canOpen) onOpenFile(file.path, kind);
           }}
           onDoubleClick={() => {
             if (canOpen) onOpenFile(file.path, kind, true);
@@ -1425,7 +1590,9 @@ function ChangeRow({
         </button>
         <div
           className={` shrink-0 items-center ${
-            active ? "flex" : "hidden group-focus-within:flex group-hover:flex"
+            highlighted
+              ? "flex"
+              : "hidden group-focus-within:flex group-hover:flex"
           }`}
         >
           {kind === "unstaged" ? (
