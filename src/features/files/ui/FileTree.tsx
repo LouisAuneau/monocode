@@ -44,6 +44,7 @@ import {
   saveExpanded,
   saveSelected,
   subscribeDirsChanged,
+  visibleChildren,
 } from "../model/fileTree";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { REMOTE_PATH_PREFIX } from "../../../shared/lib/remotePaths";
@@ -1048,11 +1049,10 @@ function TreeChildren({
         onCancel={() => ctx.onCreateCancel(creating.id)}
       />
     ) : null;
-  const visible = ctx.showExcludedFiles
-    ? entries
-    : entries?.filter((e) => !e.ignored);
-  const folders = visible?.filter((e) => e.isDir) ?? [];
-  const files = visible?.filter((e) => !e.isDir) ?? [];
+  const { folders, files } = visibleChildren(
+    entries ?? [],
+    ctx.showExcludedFiles,
+  );
   const pad = { paddingLeft: 28 + depth * 12 };
 
   return (

@@ -79,6 +79,7 @@ import { MOD } from "../../../platform/tauri/platform";
 import { applyProjectDiffStats } from "../hooks/useProjectDiffStats";
 import { useLockOverscroll } from "../../../shared/hooks/useLockOverscroll";
 import { isRemoteProjectPath } from "../../projects/model/recents";
+import { buildChangeTree, type ChangeDir } from "../model/changeTree";
 
 const GIT_POLL_MS = 2000;
 
@@ -1199,16 +1200,6 @@ export function FileSection({
   );
 }
 
-type ChangeDir = {
-  name: string;
-  /** Path relative to the repo root; "" for the implicit root. */
-  path: string;
-  dirs: ChangeDir[];
-  files: GitChangedFile[];
-  /** Status shared by every descendant, or null when they differ. */
-  status: string | null;
-};
-
 async function remotePrContent(cwd: string) {
   const range = await gitRangeContext(cwd);
   const commits = range.commitSummary.trim();
@@ -1373,52 +1364,6 @@ function isActive(
   kind: GitFileDiffKind,
 ): boolean {
   return selected === file.relative && (!selectedKind || selectedKind === kind);
-}
-
-/** Nests changed files under their directories, VS Code's tree view. */
-function buildChangeTree(files: GitChangedFile[]): ChangeDir {
-  const root: ChangeDir = {
-    name: "",
-    path: "",
-    dirs: [],
-    files: [],
-    status: null,
-  };
-  for (const file of files) {
-    const segments = file.relative.split("/");
-    let node = root;
-    for (const segment of segments.slice(0, -1)) {
-      const path = node.path ? `${node.path}/${segment}` : segment;
-      let next = node.dirs.find((dir) => dir.path === path);
-      if (!next) {
-        next = { name: segment, path, dirs: [], files: [], status: null };
-        node.dirs.push(next);
-      }
-      node = next;
-    }
-    node.files.push(file);
-  }
-  sortChangeDir(root);
-  return root;
-}
-
-/** Sorts each level (folders first) and rolls descendant status upward. */
-function sortChangeDir(dir: ChangeDir): string | null {
-  dir.dirs.sort((a, b) => a.name.localeCompare(b.name));
-  dir.files.sort((a, b) =>
-    basename(a.relative).localeCompare(basename(b.relative)),
-  );
-  let status: string | null = null;
-  let mixed = false;
-  const merge = (next: string | null) => {
-    if (next === null) mixed = true;
-    else if (status === null) status = next;
-    else if (status !== next) mixed = true;
-  };
-  for (const child of dir.dirs) merge(sortChangeDir(child));
-  for (const file of dir.files) merge(file.status);
-  dir.status = mixed ? null : status;
-  return dir.status;
 }
 
 function ChangeRow({
