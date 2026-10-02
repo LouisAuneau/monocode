@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { FsEntry } from "../../../platform/tauri/fs";
 import {
+  bulkError,
   forgetDir,
   listCachedDir,
   notifyDirsChanged,
@@ -197,5 +198,26 @@ describe("visibleTreeOrder", () => {
     expect(visibleTreeOrder(proj, expanded, false)).toEqual(
       p("src", "docs", "README.md"),
     );
+  });
+});
+
+describe("bulkError", () => {
+  it("is null when nothing failed", () => {
+    expect(bulkError([])).toBeNull();
+  });
+
+  it("keeps a single failure's message", () => {
+    expect(bulkError([{ item: "/a", error: new Error("nope") }])?.message).toBe(
+      "nope",
+    );
+  });
+
+  it("counts several failures and shows the first message", () => {
+    expect(
+      bulkError([
+        { item: "/a", error: new Error("nope") },
+        { item: "/b", error: "busy" },
+      ])?.message,
+    ).toBe("2 items failed. nope");
   });
 });

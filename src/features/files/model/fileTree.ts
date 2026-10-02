@@ -167,3 +167,16 @@ export function dirsTouchedByMove(from: string, to: string): string[] {
   const toParent = parentPath(to);
   return fromParent === toParent ? [fromParent] : [fromParent, toParent];
 }
+
+/** One error for the items a bulk operation failed on, or null when none did. */
+export function bulkError(
+  failed: readonly { item: string; error: unknown }[],
+): Error | null {
+  if (!failed.length) return null;
+  const [first] = failed;
+  const message =
+    first.error instanceof Error ? first.error.message : String(first.error);
+  return new Error(
+    failed.length === 1 ? message : `${failed.length} items failed. ${message}`,
+  );
+}
