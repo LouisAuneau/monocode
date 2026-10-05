@@ -139,6 +139,45 @@ describe("working-copy context", () => {
     expect(source.worktreeCwd).toBe(tree.path);
   });
 
+  it("moves a conversation to another worktree in place with a handoff", () => {
+    const source = {
+      ...newSession("codex", "/repo"),
+      providerSessionId: "existing-agent-thread",
+      context: { used: 12 },
+      title: "Build feature",
+      blocks: [{ id: "u", role: "user" as const, text: "Build feature" }],
+    };
+    const moved = sessionInWorktree(source, tree, { move: true });
+    expect(moved.id).toBe(source.id);
+    expect(moved.title).toBe(source.title);
+    expect(moved.cwd).toBe("/repo");
+    expect(sessionWorkCwd(moved)).toBe(tree.path);
+    expect(moved.branch).toBe(tree.branch);
+    expect(moved.providerSessionId).toBeUndefined();
+    expect(moved.context).toBeUndefined();
+    expect(moved.blocks[0]).toEqual(source.blocks[0]);
+    const handoff = moved.blocks.at(-1);
+    expect(handoff?.handoff?.pending).toBe(true);
+    expect(handoff?.text).toContain(tree.path);
+    expect(sessionWorkCwd(source)).toBe("/repo");
+  });
+
+  it("moves a conversation back to the main checkout", () => {
+    const source = {
+      ...newSession("codex", "/repo"),
+      worktreeCwd: tree.path,
+      blocks: [{ id: "u", role: "user" as const, text: "Build feature" }],
+    };
+    const moved = sessionInWorktree(
+      source,
+      { ...tree, path: "/repo", branch: "main", isMain: true },
+      { move: true },
+    );
+    expect(moved.id).toBe(source.id);
+    expect(moved.worktreeCwd).toBeUndefined();
+    expect(moved.branch).toBe("main");
+  });
+
   it("leaves the current working copy and provider context unchanged when reselected", () => {
     const source = {
       ...newSession("codex", "/repo"),
