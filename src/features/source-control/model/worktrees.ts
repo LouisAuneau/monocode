@@ -186,8 +186,16 @@ export function detachSessionWorktree<T extends { cwd: string; worktreeCwd?: str
   };
 }
 
-/** Existing working copies stay bound; removed ones can be replaced in place. */
-export function sessionInWorktree(session: Session, tree: Worktree): Session {
+/**
+ * Existing working copies stay bound; removed ones can be replaced in place.
+ * `move` carries a conversation to another working copy in place, e.g. when
+ * the agent switched checkouts on its own.
+ */
+export function sessionInWorktree(
+  session: Session,
+  tree: Worktree,
+  { move = false }: { move?: boolean } = {},
+): Session {
   if (
     !session.worktreeRemoved &&
     pathKey(sessionWorkCwd(session)) === pathKey(tree.path)
@@ -200,6 +208,13 @@ export function sessionInWorktree(session: Session, tree: Worktree): Session {
           session.harness,
           session.harness,
           `The previous working copy was deleted. Continue this conversation in ${tree.path}. Recheck the files before making changes.\n\n${buildDeterministicHandoff(session)}`,
+        )
+      : move && !isBlankSession(session)
+      ? appendReadyHandoff(
+          session,
+          session.harness,
+          session.harness,
+          `This conversation moved from ${sessionWorkCwd(session)} to ${tree.path}${tree.branch ? ` (branch ${tree.branch})` : ""}. Continue working there. Recheck the files before making changes.\n\n${buildDeterministicHandoff(session)}`,
         )
       : isBlankSession(session)
         ? session
