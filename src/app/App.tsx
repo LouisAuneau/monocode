@@ -5330,9 +5330,6 @@ function Workspace({
         else workspacePins.current.delete(sessionId);
         if (latest.worktreeRemoved)
           await keepSessionChanges(sessionId, target.path);
-        // Review tracking is bound to the old working copy; its files stay.
-        else if (move)
-          await keepSessionChanges(sessionId, sessionWorkCwd(latest));
         pendingPersist.current.delete(sessionId);
         if (shouldPersistSession(next)) await upsertSession(next);
         if (!isCurrent()) return;
