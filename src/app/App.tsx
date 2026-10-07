@@ -101,6 +101,7 @@ import {
   removeWorktree,
   renameWorktreeBranch,
   sessionInWorktree,
+  switchSessionWorktree,
   temporaryWorktreeBranchName,
   worktreeSessionIds,
   type Worktree,
@@ -5306,10 +5307,6 @@ function Workspace({
         }
         await flushSessionCheckpoint(sessionId);
         if (!isCurrent()) return;
-        for (const harness of sessionChildHarnesses(source)) {
-          await forgetHarnessSession(harness, sessionId);
-          if (!isCurrent()) return;
-        }
         const latest = sessionsRef.current.find((s) => s.id === sessionId);
         if (
           !latest ||
@@ -5321,18 +5318,26 @@ function Workspace({
             "The session changed. Try selecting the working copy again.",
           );
         }
-        const next = sessionInWorktree(latest, target, { move });
+        pendingPersist.current.delete(sessionId);
+        const next = await switchSessionWorktree(latest, target, {
+          move,
+          persist: async (session) =>
+            !shouldPersistSession(session) || !!(await upsertSession(session)),
+          release: async () => {
+            for (const harness of sessionChildHarnesses(latest))
+              await forgetHarnessSession(harness, sessionId);
+            if (latest.worktreeRemoved)
+              await keepSessionChanges(sessionId, target.path);
+          },
+          live: () => sessionsRef.current.find((s) => s.id === sessionId),
+        });
+        // Saved: from here the session must follow its stored working copy.
         if (fromComposer)
           workspacePins.current.set(
             sessionId,
             currentWorkspace(latest.cwd),
           );
         else workspacePins.current.delete(sessionId);
-        if (latest.worktreeRemoved)
-          await keepSessionChanges(sessionId, target.path);
-        pendingPersist.current.delete(sessionId);
-        if (shouldPersistSession(next)) await upsertSession(next);
-        if (!isCurrent()) return;
         invalidateLoadedSession(sessionId);
         sessionsRef.current = sessionsRef.current.map((s) =>
           s.id === sessionId ? next : s,
