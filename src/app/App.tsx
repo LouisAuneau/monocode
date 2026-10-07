@@ -5328,6 +5328,9 @@ function Workspace({
               await forgetHarnessSession(harness, sessionId);
             if (latest.worktreeRemoved)
               await keepSessionChanges(sessionId, target.path);
+            // Drop the old copy's claim so it can't block other sessions' Undo.
+            else if (move)
+              await keepSessionChanges(sessionId, sessionWorkCwd(latest));
           },
           live: () => sessionsRef.current.find((s) => s.id === sessionId),
         });
